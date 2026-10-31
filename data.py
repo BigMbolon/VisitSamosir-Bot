@@ -17,7 +17,7 @@ SERVICES = {
             {
                 "name": "Ojek & Travel Tomok",
                 "detail": "Antar-jemput dari Pelabuhan Tomok, Parapat, dan Simanindo.",
-                "contact": "+62 812-0000-0002",
+                "contact": "+62 81949666622",
             },
         ],
     },
@@ -81,4 +81,3 @@ SERVICES = {
             },
         ],
     },
-}￼Enter
