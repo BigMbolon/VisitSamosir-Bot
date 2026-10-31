@@ -1,154 +1,157 @@
-# -*- coding: utf-8 -*-
-"""
-Visit Samosir - Telegram Bot
-Menyediakan jasa layanan angkutan, penginapan, rental drone,
-rental musik tradisional Batak, catering, dan rental mobil.
-"""
-
-import logging
-import os
-
-from dotenv import load_dotenv
+import os, re
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters, ConversationHandler
+from data import SERVICES, BANK_PLATFORM
 
-from data import SERVICES
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
 
-load_dotenv()
+ASK_TANGGAL, ASK_DURASI, ASK_NAMA, ASK_KONFIRM, ASK_BAYAR, ASK_BUKTI = range(6)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "-")
+def get_harga(detail):
+    m = re.search(r"Rp\s?([\d\.]+)", detail)
+    if m: return int(m.group(1).replace(".",""))
+    return 350000
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger("visit_samosir_bot")
+def main_menu():
+    return InlineKeyboardMarkup([[InlineKeyboardButton(v["title"], callback_data=f"cat:{k}")] for k,v in SERVICES.items()])
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text("<b>Visit Samosir 🏝️</b>\nPesan layanan + bayar langsung via bot. Komisi otomatis.", reply_markup=main_menu(), parse_mode=ParseMode.HTML)
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Keyboard menu utama."""
-    buttons = [
-        [InlineKeyboardButton(SERVICES["angkutan"]["title"], callback_data="svc:angkutan")],
-        [InlineKeyboardButton(SERVICES["penginapan"]["title"], callback_data="svc:penginapan")],
-        [InlineKeyboardButton(SERVICES["drone"]["title"], callback_data="svc:drone")],
-        [InlineKeyboardButton(SERVICES["musik"]["title"], callback_data="svc:musik")],
-        [InlineKeyboardButton(SERVICES["catering"]["title"], callback_data="svc:catering")],
-        [InlineKeyboardButton(SERVICES["mobil"]["title"], callback_data="svc:mobil")],
-    ]
-    return InlineKeyboardMarkup(buttons)
-
-
-def back_keyboard() -> InlineKeyboardMarkup:
-    """Tombol kembali ke menu utama."""
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("⬅️ Kembali ke Menu", callback_data="menu")]]
-    )
-
-
-def format_service(key: str) -> str:
-    """Membentuk teks detail untuk satu kategori layanan."""
-    service = SERVICES[key]
-    lines = [f"<b>{service['title']}</b>", "", service["description"], ""]
-    for idx, item in enumerate(service["items"], start=1):
-        lines.append(f"<b>{idx}. {item['name']}</b>")
-        lines.append(item["detail"])
-        lines.append(f"📞 Kontak: {item['contact']}")
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
-WELCOME_TEXT = (
-    "<b>Selamat datang di Visit Samosir! 🌄</b>\n\n"
-    "Temukan berbagai layanan wisata di Pulau Samosir, "
-    "Danau Toba.\n\n"
-    "Silakan pilih layanan yang Anda butuhkan:"
-)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler untuk perintah /start."""
-    await update.message.reply_text(
-        WELCOME_TEXT,
-        reply_markup=main_menu_keyboard(),
-        parse_mode=ParseMode.HTML,
-    )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler untuk perintah /help."""
-    text = (
-        "<b>Panduan Visit Samosir</b>\n\n"
-        "/start - Tampilkan menu utama\n"
-        "/menu - Tampilkan menu utama\n"
-        "/help - Tampilkan bantuan\n"
-        "/kontak - Hubungi admin\n\n"
-        "Pilih layanan melalui tombol yang tersedia."
-    )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
-
-async def kontak(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler untuk perintah /kontak."""
-    await update.message.reply_text(
-        f"Hubungi admin kami: {ADMIN_CONTACT}"
-    )
-
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Menangani semua klik tombol inline."""
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == "menu":
-        await query.edit_message_text(
-            WELCOME_TEXT,
-            reply_markup=main_menu_keyboard(),
-            parse_mode=ParseMode.HTML,
-        )
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+    if d == "home":
+        context.user_data.clear()
+        await q.edit_message_text("Pilih layanan:", reply_markup=main_menu())
         return
+    if d.startswith("cat:"):
+        cat = d.split(":")[1]
+        btns = [[InlineKeyboardButton(it["name"], callback_data=f"view:{cat}:{i}")] for i,it in enumerate(SERVICES[cat]["items"])]
+        btns.append([InlineKeyboardButton("⬅️ Menu", callback_data="home")])
+        await q.edit_message_text(f"<b>{SERVICES[cat]['title']}</b>\n{SERVICES[cat]['description']}", reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+    if d.startswith("view:"):
+        _, cat, idx = d.split(":")
+        item = SERVICES[cat]["items"][int(idx)]
+        context.user_data.update({"cat": cat, "item": item, "harga": get_harga(item["detail"])})
+        txt = f"<b>{item['name']}</b>\n{item['detail']}\nHarga: Rp {context.user_data['harga']:,}"
+        btns = [[InlineKeyboardButton("🛒 Pesan Sekarang", callback_data="order:start")],[InlineKeyboardButton("⬅️ Kembali", callback_data=f"cat:{cat}")]]
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+    if d == "order:start":
+        await q.edit_message_text("📅 Tanggal pakai? (contoh: 5 Nov 2026)")
+        return ASK_TANGGAL
 
-    if data.startswith("svc:"):
-        key = data.split(":", 1)[1]
-        if key in SERVICES:
-            await query.edit_message_text(
-                format_service(key),
-                reply_markup=back_keyboard(),
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
+async def ask_tanggal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["tanggal"] = update.message.text
+    await update.message.reply_text("⏱️ Durasi berapa hari? (ketik angka, misal: 2)")
+    return ASK_DURASI
 
+async def ask_durasi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try: dur = int(re.findall(r"\d+", update.message.text)[0])
+    except: dur = 1
+    context.user_data["durasi"] = dur
+    context.user_data["total"] = context.user_data["harga"] * dur
+    await update.message.reply_text(f"Total {dur} hari = Rp {context.user_data['total']:,}\n👤 Atas nama siapa?")
+    return ASK_NAMA
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Mencatat error agar mudah di-debug di log hosting."""
-    logger.error("Terjadi error: %s", context.error, exc_info=context.error)
+async def ask_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["nama"] = update.message.text
+    total = context.user_data["total"]
+    komisi = context.user_data["item"].get("komisi", 0.15)
+    txt = (
+        f"<b>Konfirmasi</b>\n"
+        f"{context.user_data['item']['name']}\n"
+        f"Tgl: {context.user_data['tanggal']} | {context.user_data['durasi']} hari\n"
+        f"Nama: {context.user_data['nama']}\n"
+        f"Total Bayar: Rp {total:,}\n\n"
+        f"Lanjut bayar ke platform?"
+    )
+    await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Lanjut Bayar", callback_data="confirm:yes")]]), parse_mode=ParseMode.HTML)
+    return ASK_KONFIRM
 
+async def ask_konfirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    txt = f"💳 Transfer ke Platform:\n{BANK_PLATFORM}\n\nTotal: <b>Rp {context.user_data['total']:,}</b>"
+    btns = [[InlineKeyboardButton("✅ Sudah Transfer", callback_data="bayar:transfer")],[InlineKeyboardButton("📲 QRIS", callback_data="bayar:qris")],[InlineKeyboardButton("💵 COD", callback_data="bayar:cod")]]
+    await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode=ParseMode.HTML)
+    return ASK_BAYAR
 
-def main() -> None:
-    if not BOT_TOKEN:
-        raise RuntimeError(
-            "BOT_TOKEN belum diatur. Isi di file .env atau di environment variable."
-        )
+async def ask_bayar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    metode = q.data.split(":")[1].upper()
+    context.user_data["metode"] = metode
+    if metode == "COD":
+        await q.edit_message_text("✅ Pesanan COD dicatat. Admin akan hubungi.")
+        await kirim_admin(update, context, bukti=False)
+        context.user_data.clear()
+        return ConversationHandler.END
+    else:
+        await q.edit_message_text(f"Kamu pilih {metode}. Upload bukti transfer (kirim FOTO):")
+        return ASK_BUKTI
 
-    application = Application.builder().token(BOT_TOKEN).build()
+async def ask_bukti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    file_id = update.message.photo[-1].file_id if update.message.photo else None
+    context.user_data["bukti"] = file_id
+    # Balas ke user
+    await update.message.reply_text(
+        f"✅ Bukti diterima!\nPesanan lunas. Kontak supir/pemilik: {context.user_data['item']['contact']}\nAdmin akan teruskan pembayaran ke pemilik setelah potong komisi.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Menu", callback_data="home")]])
+    )
+    await kirim_admin(update, context, bukti=True)
+    context.user_data.clear()
+    return ConversationHandler.END
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("menu", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("kontak", kontak))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_error_handler(error_handler)
+async def kirim_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, bukti=False):
+    item = context.user_data["item"]
+    total = context.user_data["total"]
+    persen = item.get("komisi", 0.15)
+    komisi_rp = int(total * persen)
+    bersih = total - komisi_rp
+    caption = (
+        f"🔥 <b>ORDER LUNAS - {context.user_data['metode']}</b>\n\n"
+        f"Item: {item['name']}\n"
+        f"Tgl: {context.user_data['tanggal']} | {context.user_data['durasi']} hari\n"
+        f"Nama: {context.user_data['nama']} | @{update.effective_user.username}\n\n"
+        f"Total User: Rp {total:,}\n"
+        f"Komisi {int(persen*100)}%: Rp {komisi_rp:,}\n"
+        f"<b>Hak Pemilik: Rp {bersih:,}</b>\n"
+        f"Bank Pemilik: {item.get('bank_pemilik','-')}\n\n"
+        f"ACTION: Transfer Rp {bersih:,} ke pemilik!"
+    )
+    if ADMIN_ID:
+        try:
+            if bukti and context.user_data.get("bukti"):
+                await context.bot.send_photo(chat_id=ADMIN_ID, photo=context.user_data["bukti"], caption=caption, parse_mode=ParseMode.HTML)
+            else:
+                await context.bot.send_message(chat_id=ADMIN_ID, text=caption, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            print(e)
 
-    logger.info("Visit Samosir Bot berjalan...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
+def main():
+    app = Application.builder().token(TOKEN).build()
+    conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(menu_handler, pattern="^order:start")],
+        states={
+            ASK_TANGGAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_tanggal)],
+            ASK_DURASI: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_durasi)],
+            ASK_NAMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_nama)],
+            ASK_KONFIRM: [CallbackQueryHandler(ask_konfirm, pattern="^confirm:")],
+            ASK_BAYAR: [CallbackQueryHandler(ask_bayar, pattern="^bayar:")],
+            ASK_BUKTI: [MessageHandler(filters.PHOTO, ask_bukti)],
+        },
+        fallbacks=[CommandHandler("start", start)],
+        allow_reentry=True
+    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern="^(home|cat:|view:)"))
+    app.add_handler(conv)
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
