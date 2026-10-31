@@ -4,7 +4,7 @@ Data layanan Visit Samosir.
 Edit bagian ini untuk menambah atau mengubah daftar penyedia jasa.
 """
 
-SERVICES = {
+SERVICES = {}
     "angkutan": {
         "title": "🚌 Jasa Angkutan",
         "description": "Layanan transportasi antar-kota dan wisata di Samosir.",
@@ -12,12 +12,12 @@ SERVICES = {
             {
                 "name": "Angkutan Pariwisata Samosir",
                 "detail": "Mobil elf/bus untuk rombongan, tersedia antar-jemput dan paket wisata keliling Pulau Samosir.",
-                "contact": "+62 812-0000-0001",
+                "contact": "+62 819-4966-6622",
             },
             {
                 "name": "Ojek & Travel Tomok",
                 "detail": "Antar-jemput dari Pelabuhan Tomok, Parapat, dan Simanindo.",
-                "contact": "+62 81949666622",
+                "contact": "+62 819-4966-6622",
             },
         ],
     },
